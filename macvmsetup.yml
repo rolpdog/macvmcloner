@@ -1,0 +1,141 @@
+- hosts: all
+  gather_facts: no
+  vars:
+    gha_runner_release_url: https://github.com/actions/runner/releases/download/v2.280.2/actions-runner-osx-x64-2.280.2.tar.gz
+  tasks:
+  - validate_argument_spec:
+      argument_spec:
+        runner_token:
+          required: yes
+        repo_url:
+          required: yes
+
+  - name: Allow 'admin' group to have passwordless sudo
+    vars:
+      ansible_become: yes
+      ansible_become_password: '{{ ansible_password }}'
+    lineinfile:
+      dest: /etc/sudoers
+      state: present
+      regexp: '^%admin'
+      line: '%admin ALL=(ALL) NOPASSWD: ALL'
+      validate: visudo -cf %s
+
+  - name: install rosetta2
+    raw: /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+
+  - name: install homebrew
+    environment:
+      NONINTERACTIVE: 1
+    shell: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    args:
+      creates: /opt/homebrew/bin/brew
+
+  # NB: we had to hardcode the executable to /bin/bash in ansible.cfg to make PATH extensibility work for shell and others (eg unarchive)
+  - name: ensure homebrew is in profile path
+    lineinfile:
+      dest: ~/.bashrc
+      create: yes
+      line: export PATH=$PATH:/opt/homebrew/bin
+
+  # this is what makes it work for everything else
+  - name: ensure homebrew is on global system PATH
+    become: yes
+    copy:
+      dest: /etc/paths.d/brew
+      content: |+
+        /opt/homebrew/bin
+
+  # non-login /bin/sh on MacOS seemingly cannot have its PATH updated in any way, and we can't override /bin/sh via
+  # inventory, so we must FQ homebrew and do other hacks elsewhere
+  - name: install dev tools from brew
+    shell: brew install automake autoconf coreutils gnu-tar libtool pkgconfig
+
+  - name: prep for cibuildwheel python install
+    raw: /usr/bin/pip3 install cibuildwheel
+
+  - tempfile:
+      state: directory
+    register: pyprojecttemp
+
+  - name: bogus python wheel target
+    copy:
+      dest: '{{pyprojecttemp.path}}/setup.py'
+      content: |
+        from setuptools import setup, Extension
+        setup(name='foo', version='0.1', ext_modules=[Extension('foo', ['foo.c'])])
+
+  - name: bogus python wheel source
+    copy:
+      dest: '{{pyprojecttemp.path}}/foo.c'
+      content: |
+        void sayhi() { }
+
+  - name: ensure wheelhouse is missing
+    file:
+      path: ~/wheelhouse
+      state: absent
+
+  - name: (ab)use cibuildwheel to install python.org Pythons
+    raw: CIBW_BUILD={{item}}-macosx_arm64 python3 -m cibuildwheel --platform macos {{pyprojecttemp.path}}
+    with_items:
+    - cp39
+    - cp310
+
+  - name: ensure GHA runner dir
+    file:
+      path: ~/actions-runner
+      state: directory
+
+  - name: install GHA runner
+    unarchive:
+      src: '{{ gha_runner_release_url }}'
+      remote_src: yes
+      dest: ~/actions-runner
+
+  - name: configure GHA runner
+    shell: arch -x86_64 ./config.sh --url {{ repo_url }} --token {{ runner_token }} --unattended
+    args:
+      chdir: ~/actions-runner
+
+  - name: create GHA runner wrapper script
+    copy:
+      dest: ~/actions-runner/gha.sh
+      mode: '555'
+      content: |+
+        #!/bin/bash
+        echo "Worker Local IP is $(ipconfig getifaddr en0)"
+        $(dirname "$0")/run.sh --once
+        echo 'Job completed, shutting down worker machine...'
+        sudo shutdown -h now
+
+  - name: ensure local LaunchAgents dir exists
+    file:
+      path: ~/Library/LaunchAgents
+      state: directory
+
+  - name: create GHA runner launchd config
+    copy:
+      dest: ~/Library/LaunchAgents/gha.plist
+      content: |+
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+          <dict>
+            <key>Label</key>
+            <string>gha</string>
+            <key>ProgramArguments</key>
+            <array>
+              <string>open</string>
+              <string>-a</string>
+              <string>Terminal</string>
+              <string>/Users/runner/actions-runner/gha.sh</string>
+            </array>
+            <key>UserName</key>
+            <string>runner</string>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>ProcessType</key>
+            <string>Interactive</string>
+          </dict>
+        </plist>
