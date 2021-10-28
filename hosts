@@ -1,0 +1,2 @@
+vmbuild ansible_host=192.168.64.128 ansible_user=runner ansible_password=yourmom ansible_python_interpreter=/usr/bin/python
+

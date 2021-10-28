@@ -1,7 +1,7 @@
 - hosts: all
   gather_facts: no
   vars:
-    gha_runner_release_url: https://github.com/actions/runner/releases/download/v2.280.2/actions-runner-osx-x64-2.280.2.tar.gz
+    gha_runner_release_url: https://github.com/actions/runner/releases/download/v2.283.3/actions-runner-osx-x64-2.283.3.tar.gz
   tasks:
   - validate_argument_spec:
       argument_spec:
@@ -94,7 +94,7 @@
       dest: ~/actions-runner
 
   - name: configure GHA runner
-    shell: arch -x86_64 ./config.sh --url {{ repo_url }} --token {{ runner_token }} --unattended
+    shell: arch -x86_64 ./config.sh --url {{ repo_url }} --token {{ runner_token }} --unattended --labels arm64
     args:
       chdir: ~/actions-runner
 

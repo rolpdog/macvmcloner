@@ -5,7 +5,7 @@ import subprocess
 import uuid
 
 def main():
-    source_image_path = '/Users/mdavis/Parallels/gha_rolpdog.macvm'
+    source_image_path = '/Users/mdavis/Parallels/1201_gharunner.macvm'
     ephemeral_image_dir = '/Users/mdavis/Parallels/_ephemeral'
     prl_macvm_app_path = '/Applications/Parallels Desktop.app/Contents/MacOS/Parallels Mac VM.app/Contents/MacOS/prl_macvm_app'
 
